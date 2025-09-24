@@ -1,16 +1,21 @@
 #!/bin/bash
-#SBATCH -c 2                # Number of cores (-c)
-#SBATCH -t 0-02:30          # Runtime in D-HH:MM, minimum of 10 minutes
-#SBATCH -p shared   # Partition to submit to
-#SBATCH --mem=150           # Memory pool for all cores (see also --mem-per-cpu)
-#SBATCH -o output_%j.out  # File to which STDOUT will be written, %j inserts jobid
-#SBATCH -e errors_%j.err  # File to which STDERR will be written, %j inserts jobid
+#SBATCH --account=def-aliceh
+#SBATCH --time=2:00:00
+#SBATCH --array=0-8
+#SBATCH --cpus-per-task=1
+#SBATCH --job-name=altruism
+#SBATCH --output=%x-%j.out
+#SBATCH --mail-user=alice.huang@uwo.ca
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
 
-echo 'Begin'
+echo "Starting SLURM task ${SLURM_ARRAY_TASK_ID}..."
 
-module load python/3.10.9-fasrc01
+module load python/3.13
+module load scipy-stack
+source ~/.virtualenvs/ENV/bin/activate
 
-source activate global_reward_ENV
+# Pass the array task ID as argument to the script
+python3 model.py ${SLURM_ARRAY_TASK_ID}
 
-python3 model.py
-echo 'Done'
+echo "Done with task ${SLURM_ARRAY_TASK_ID}"
