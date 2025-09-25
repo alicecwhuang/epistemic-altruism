@@ -441,8 +441,8 @@ def run_experiment(index):
 
     columns = ['n', 'prior', 'reliability', 
            'matrix_flex', 'success_flex',
-           'matrix_flexCoop_F', 'success_flexCoop_F',
-           'matrix_flexComp_F', 'success_flexComp_F'
+           'matrix_flexCoop', 'success_flexCoop',
+           'matrix_flexComp', 'success_flexComp'
           ]
     df = pd.DataFrame(columns=columns)
 
