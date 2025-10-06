@@ -76,74 +76,7 @@ class Model():
             for i in range(self.round_per_gen):
                 self.play()
 
-
-# #### Draw network
-
-# In[32]:
-
-
-# def create_network(model, threshold):    
-    
-#     # Create a directed graph with significant edges (above threshold prob)
-#     G = nx.DiGraph()
-#     G.add_node('nature')
-#     for a in model.agents:
-#         G.add_node(a.id)
-#         if a.urn[0]/sum(a.urn) > threshold:
-#             G.add_edge(a.id, "nature", weight=a.urn[0]/sum(a.urn))
-#         for i in range(model.n):
-#             if (a.id != i) and (a.urn[i+1]/sum(a.urn) > threshold):
-#                 G.add_edge(a.id, i, weight=a.urn[i+1]/sum(a.urn))
-#     return(G)
-
-
-# In[31]:
-
-
-# def plot_network(model, G, threshold=0.3):
-
-#     # G = create_network(model, threshold)
-#     # Get the weights for the edges
-#     weights = nx.get_edge_attributes(G, 'weight')
-    
-#     # Normalize weights for better visualization
-#     max_weight = max(weights.values(), default=1)
-#     edge_widths = [(weight * 2) / max_weight for weight in weights.values()]
-    
-#     # Draw the network
-#     pos = nx.shell_layout(G)
-#     nx.draw(G, pos, with_labels=False, node_color='lightblue', node_size=1500, 
-#             arrows=True, arrowstyle='-|>', arrowsize=20, edge_color='black', 
-#             width=edge_widths, edgecolors='black')
-
-#     # Label with reliability
-#     labels = {key: value for key, value in zip(range(model.n), model.Rs)}
-#     labels['nature'] = 'nature'
-#     nx.draw_networkx_labels(G, pos, labels=labels, font_size=10)
-
-#     # Label edges
-#     edge_labels = {(u, v): f'{d["weight"]:.2f}' for u, v, d in G.edges(data=True)}
-
-#     for (u, v), label in edge_labels.items():
-#         # Compute midpoint
-#         x_start, y_start = pos[u]
-#         x_end, y_end = pos[v]
-        
-#         # Offset to position label closer to the start of the edge
-#         offset = 0.6  # Adjust this value to control the distance from the start
-#         x_label = x_start + offset * (x_end - x_start)
-#         y_label = y_start + offset * (y_end - y_start)
-        
-#         # Draw the label
-#         plt.text(x_label, y_label, label, color='black', fontsize=10, 
-#                  ha='center', va='center',
-#                  bbox=dict(facecolor='white', edgecolor='none', boxstyle='round,pad=0.3')
-#                 )
-
 # #### BH Model (My Version)
-
-# In[6]:
-
 
 class BHAgent(Agent):
     def __init__(self, model, id, reliability, n_votes=3):
@@ -159,6 +92,7 @@ class BHAgent(Agent):
         self.urn = self.urn + choice # Return balls back to urn
         return choice
     def update(self):
+        """update belief my majority vote"""
         self.choice = self.choose()
         votes = 0
         for i in range(self.choice[0]):
@@ -166,8 +100,10 @@ class BHAgent(Agent):
         votes += sum(self.choice[1:] * np.array([a.belief for a in self.model.agents]))
         if votes > (sum(self.choice) * 0.5):
             self.belief = 1
-        else:
+        elif votes < (sum(self.choice) * 0.5):
             self.belief = 0
+        else:
+            self.belief = random.choice([0, 1])
         self.n_success += self.belief
     def reinforce(self):
         if self.belief:
@@ -295,23 +231,26 @@ class flexAgent(Agent):
         return choice
         
     def update(self):
+        """self.choice records who is consulted"""
+        """self.votes records who is correct out of those consulted"""
         self.choice = self.choose()
         self.votes = self.choice * (np.concatenate([np.array([self.experiment()]), 
                                                np.array([a.belief for a in self.model.agents])]))
         if sum(self.votes) > (sum(self.choice) * 0.5):
             self.belief = 1
-        else:
+        elif sum(self.votes) < (sum(self.choice) * 0.5):
             self.belief = 0
+        else:
+            self.belief = (random.choice([0, 1]))
         self.n_success += self.belief
 
     def reinforce(self):
         for i in range(len(self.choice)):
             if self.choice[i]:
-                if self.votes[i]:
+                if self.votes[i]: # increase prob of consulting again if correct this round
                     self.urn[i][0] += 1
-                else:
+                else: # reduce prob of consulting again if incorrect this round
                     self.urn[i][1] += 1
-        self.urn[self.id+1] = [0, 1]
 
 
 # In[129]:
@@ -335,28 +274,6 @@ class flexModel(Model):
             a.urn = np.full((self.n + 1, 2), a.prior)
             a.urn[a.id+1] = [0, 1] # agents do not draw themselves
 
-
-# #### Test flexible model
-
-# In[130]:
-
-
-# def create_network_flex(model, threshold=0.5):    
-    
-#     # Create a directed graph with significant edges (above threshold prob)
-#     G = nx.DiGraph()
-#     G.add_node('nature')
-#     for a in model.agents:
-#         G.add_node(a.id)
-#         if a.urn[0][0]/sum(a.urn[0]) > threshold:
-#             G.add_edge(a.id, "nature", weight=a.urn[0][0]/sum(a.urn[0]))
-#         for i in range(model.n):
-#             if (a.id != i) and (a.urn[i+1][0]/sum(a.urn[i+1]) > threshold):
-#                 G.add_edge(a.id, i, weight=a.urn[i+1][0]/sum(a.urn[i+1]))
-#     return(G)
-
-
-
 # #### Add group rewards
 
 # In[282]:
@@ -369,16 +286,14 @@ class flexWeightAgent(flexAgent):
         super().__init__(model, id, reliability, prior)
         self.w = w # weight
     def reinforce(self, s):
+        """s: number of (un)successful peers this round"""
         for i in range(len(self.choice)):
             if self.choice[i]:
                 if self.votes[i]:
                     self.urn[i][0] += s * self.w
                 else:
                     self.urn[i][1] += s * self.w
-        self.urn[self.id+1] = [0, 1]
 
-
-# In[283]:
 
 
 class flexCoopModel(flexModel):
@@ -395,7 +310,7 @@ class flexCoopModel(flexModel):
         for i in ls:
             a = self.agents[i]
             a.update()
-        s = sum([a.belief for a in self.agents]) # Number of unsuccessful agents this round
+        s = sum([a.belief for a in self.agents]) # Number of successful agents this round
 
         for a in self.agents:
             a.reinforce(s)
