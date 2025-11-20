@@ -3,15 +3,11 @@ import numpy as np
 import pandas as pd
 import scipy.stats
 import ast
-from concurrent.futures import ProcessPoolExecutor
 
 
 # ### First Phase (5 agents, 3 balls fixed)
 
 # #### Perfect communication model in BSM
-
-# In[2]:
-
 
 class Agent():
     def __init__(self, model, id, reliability):
@@ -22,7 +18,7 @@ class Agent():
         self.urn = np.array([]) # probability [nature, agent 1, agent 2,...]
         self.belief = 0 # current belief
         self.choice = None
-        self.n_success = 0 # accumulted number of successes
+        self.n_success = 0 # accumulated number of successes
     def choose(self):
         """randomly draw one ball"""
         prob = self.urn/sum(self.urn)
@@ -43,7 +39,7 @@ class Agent():
             self.urn[self.choice] += 1
 
 
-# In[3]:
+# In[13]:
 
 
 class Model():
@@ -78,9 +74,8 @@ class Model():
             for i in range(self.round_per_gen):
                 self.play()
 
-# #### BH Model (My Version)
 
-# In[63]:
+# #### BH Model (My Version)
 
 
 class BHAgent(Agent):
@@ -116,8 +111,6 @@ class BHAgent(Agent):
             self.urn = self.urn + self.choice
 
 
-# In[64]:
-
 
 class BHModel(Model):
     def __init__(self, n=5, round_per_gen=100, gen_per_run=200):
@@ -129,94 +122,9 @@ class BHModel(Model):
         self.init_agents()
 
 
-# #### Add Group Reward (Consensus) to BH Model
-
-# In[24]:
-
-
-class CoopWeightAgent(BHAgent):
-    "Strength of reinforcement dependent on success of group"
-    "Only reinforce if there is individual success"
-    def __init__(self, model, id, reliability, n_votes=3, w=1):
-        super().__init__(model, id, reliability, n_votes)
-        self.w = w # weight
-    def reinforce(self, s):
-        if self.belief:
-            self.urn = self.urn + self.choice * self.w * s
-
-
-# In[25]:
-
-
-class CoopBonusAgent(BHAgent):
-    "First reinforce based on individual results"
-    "BONUS reinforcement dependent on success of group"
-    def __init__(self, model, id, reliability, n_votes=3, w=1):
-        super().__init__(model, id, reliability, n_votes)
-        self.w = w # weight
-    def reinforce(self, s):
-        if self.belief:
-            self.urn = self.urn + self.choice
-        self.urn = self.urn + self.choice * self.w * s # group reinforcement regardless of belief
-
-
-# In[26]:
-
-
-class CoopRewardModel(BHModel):
-    def __init__(self, n=5, round_per_gen=100, gen_per_run=200, weight=1, v=1):
-        super().__init__(n, round_per_gen, gen_per_run)
-        self.w = weight
-        self.agents = []
-        if v == 1:
-            for i in range(n):
-                self.agents.append(CoopWeightAgent(self, i, self.Rs[i]))
-        elif v == 2:
-            for i in range(n):
-                self.agents.append(CoopBonusAgent(self, i, self.Rs[i]))
-        self.init_agents()
-    def play(self):
-        ls = list(range(self.n))
-        random.shuffle(ls)
-        for i in ls:
-            a = self.agents[i]
-            a.update()
-        s = sum([a.belief for a in self.agents]) # Number of successful agents this round
-        for a in self.agents:
-            a.reinforce(s)
-
-
-# #### Add Competition to BH Model
-
-# In[27]:
-
-
-class CompetitionModel(BHModel):
-    def __init__(self, n=5, round_per_gen=100, gen_per_run=200, weight=1, v=1):
-        super().__init__(n, round_per_gen, gen_per_run)
-        self.w = weight
-        self.agents = []
-        if v == 1:
-            for i in range(n):
-                self.agents.append(CoopWeightAgent(self, i, self.Rs[i]))
-        elif v == 2:
-            for i in range(n):
-                self.agents.append(CoopBonusAgent(self, i, self.Rs[i]))
-        self.init_agents()
-    def play(self):
-        ls = list(range(self.n))
-        random.shuffle(ls)
-        for i in ls:
-            a = self.agents[i]
-            a.update()
-        s = self.n - sum([a.belief for a in self.agents]) # Number of unsuccessful agents this round
-        for a in self.agents:
-            a.reinforce(s)
-
-
 # ### Fine-grained reward
 
-# In[75]:
+# In[24]:
 
 
 class fgBHAgent(BHAgent):
@@ -224,10 +132,13 @@ class fgBHAgent(BHAgent):
         super().__init__(model, id, reliability)
         self.n_votes = n_votes
     def reinforce(self):
+        """Only reinforce for agents that gave the correct answer this round""" 
+        """(Instead of everyone asked this round)"""
         if self.belief:
             self.urn = self.urn + self.results
 
-# In[76]:
+
+# In[25]:
 
 
 class fgBHModel(BHModel):
@@ -240,90 +151,64 @@ class fgBHModel(BHModel):
         self.init_agents()
 
 
-# In[77]:
+class TwoUrnAgent(fgBHAgent):
+    def __init__(self, model, id, reliability, payoff=3, cost=0.5, n_votes=None):
+        super().__init__(model, id, reliability)
+        self.Q_urn = np.array([]) # First urn determines how many consultations
+        self.p = payoff
+        self.c = cost
+    def choose_quantity(self):
+        """randomly draw one ball from the quantity urn to determine how many balls to draw from second urn"""
+        prob = self.Q_urn/sum(self.Q_urn)
+        self.n_votes = np.random.choice(len(self.Q_urn), size=1, p=prob)[0] + 1
+    def choose(self):
+        """choose who to consult (no repeat)"""
+        choice = np.array([0]*len(self.urn))
+        prob = self.urn/sum(self.urn) # Prob proportionate to num of balls
+        choice[np.random.choice(range(len(self.urn)), size=self.n_votes, replace=False, p=prob)] = 1
+        return choice
+    def reinforce_Q(self):
+        current = self.Q_urn[self.n_votes - 1]
+        adjusted = current + (self.belief * self.p - self.n_votes * self.c)
+        self.Q_urn[self.n_votes - 1] = max(adjusted, 1)
 
 
-class fgCoopWeightAgent(CoopWeightAgent):
-    "Strength of reinforcement dependent on success of group"
-    "Only reinforce if there is individual success"
-    def __init__(self, model, id, reliability, n_votes=3, w=1):
-        super().__init__(model, id, reliability, n_votes, w)
-    def reinforce(self, s):
-        if self.belief:
-            self.urn = self.urn + self.results * self.w * s
+# In[200]:
 
 
-# In[81]:
-
-
-class fgCoopRewardModel(CoopRewardModel):
-    def __init__(self, n=5, round_per_gen=100, gen_per_run=200, weight=1):
-        super().__init__(n, round_per_gen, gen_per_run, weight)
+class TwoUrnModel(BHModel):
+    def __init__(self, n=5, round_per_gen=100, gen_per_run=200, payoff=3, cost=0.5, min_R=0, max_R=1):
+        super().__init__(n, round_per_gen, gen_per_run)
+        self.Rs = np.round(np.random.uniform(min_R, max_R, size=n), 2)
         self.agents = []
+        self.p = payoff
+        self.c = cost
         for i in range(n):
-            self.agents.append(fgCoopWeightAgent(self, i, self.Rs[i]))
+            self.agents.append(TwoUrnAgent(self, i, self.Rs[i], payoff, cost))
         self.init_agents()
-
-
-# In[82]:
-
-
-class fgCompetitionModel(fgCoopRewardModel):
-    def __init__(self, n=5, round_per_gen=100, gen_per_run=200, weight=1):
-        super().__init__(n, round_per_gen, gen_per_run, weight)
+    def init_agents(self):
+        """update agent parameters"""
+        for a in self.agents:
+            a.peers = self.agents
+            a.urn = np.array([1] * (self.n + 1))
+            a.urn[a.id+1] = 0
+            a.Q_urn = np.array([1] * (self.n))
     def play(self):
         ls = list(range(self.n))
-        random.shuffle(ls)
+        random.shuffle(ls) # Agents update in random order
         for i in ls:
             a = self.agents[i]
+            a.choose_quantity()
             a.update()
-        s = self.n - sum([a.belief for a in self.agents]) # Number of unsuccessful agents this round
-        for a in self.agents:
-            a.reinforce(s)
+            a.reinforce_Q()
+            a.reinforce()
 
 
-# #### Test fine-grained reward models
+df = pd.DataFrame(columns=['reliability', 'matrix', 'Q_matrix', 'success'])
+for i in range(1):
+    m = TwoUrnModel(n=5, payoff=3, cost=0.2, min_R=0, max_R=1)
+    m.run()
+    df.loc[i] = [m.Rs, [a.urn for a in m.agents], [a.n_success for a in m.agents], [a.Q_urn for a in m.agents]]
 
-# In[83]:
-
-
-columns = ['reliability', 
-           'matrix_fgBH', 'success_fgBH', 
-           'matrix_fgCoopWeight_F', 'success_fgCoopWeight_F',
-           'matrix_fgCompWeight_F', 'success_fgCompWeight_F'
-          ]
-df = pd.DataFrame(columns=columns)
-n = 5
-
-Rs = pd.read_csv('Rs.csv')
-Rs = Rs['reliability'].apply(ast.literal_eval)
-
-
-def run_simulation(i):
-    models = [fgBHModel(n=n),
-              fgCoopRewardModel(n=n, weight=1), 
-              fgCompetitionModel(n=n, weight=1)]
-    
-    for m in models:
-        for a in m.agents:
-            a.r = Rs[i][a.id]
-    
-    data = []
-    data.append(Rs[i])
-    for m in models:
-        m.run()
-        data.append([a.urn for a in m.agents])
-        data.append([a.n_success for a in m.agents])
-    
-    return data
-
-# Run in parallel
-with ProcessPoolExecutor() as executor:
-    Results = list(executor.map(run_simulation, range(10)))
-
-# Build final DataFrame
-df = pd.DataFrame(Results, columns=columns)
-
-df.to_csv('test.csv', index=False)
 
 
