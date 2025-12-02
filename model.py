@@ -3,6 +3,10 @@ import numpy as np
 import pandas as pd
 import scipy.stats
 import ast
+import concurrent.futures
+import sys
+import os
+import itertools
 
 
 # ### First Phase (5 agents, 3 balls fixed)
@@ -203,12 +207,48 @@ class TwoUrnModel(BHModel):
             a.reinforce_Q()
             a.reinforce()
 
-
-df = pd.DataFrame(columns=['reliability', 'matrix', 'Q_matrix', 'success'])
-for i in range(1):
-    m = TwoUrnModel(n=5, payoff=3, cost=0.2, min_R=0, max_R=1)
+def simulation(params):
+    np.random.seed()
+    n, payoff, cost, min_R, max_R = params
+    m = TwoUrnModel(n=n, payoff=payoff, cost=cost, min_R=min_R, max_R=max_R)
     m.run()
-    df.loc[i] = [m.Rs, [a.urn for a in m.agents], [a.n_success for a in m.agents], [a.Q_urn for a in m.agents]]
+    return {
+        'n': n,
+        'payoff': payoff,
+        'cost': cost,
+        'min_R': min_R,
+        'max_R': max_R,
+        'reliability': m.Rs,
+        'matrix': [a.urn for a in m.agents],
+        'Q_matrix': [a.Q_urn for a in m.agents],
+        'success': [a.n_success for a in m.agents]
+    }
 
+if __name__ == "__main__":
+    # Parameter lists
+    n_values = [5, 8, 12]
+    payoff_values = [2, 4, 8]
+    cost_values = [0.1, 0.2, 0.4]
+    min_R_values = [0, 0.2, 0.5]
+    max_R_values = [0.75, 0.85, 1]
 
+    # Generate all combinations
+    combinations = list(itertools.product(n_values, payoff_values, cost_values, min_R_values, max_R_values))
 
+    # Get SLURM task ID
+    task_id = int(sys.argv[1])
+    params = combinations[task_id]
+
+    os.makedirs("results", exist_ok=True)
+
+    # Run simulations in parallel
+    results = []
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        futures = [executor.submit(simulation, params) for _ in range(100)]
+        for f in concurrent.futures.as_completed(futures):
+            results.append(f.result())
+
+    # Save DataFrame
+    df = pd.DataFrame(results)
+    filename = f"results/result_{task_id}.csv"
+    df.to_csv(filename, index=False)
